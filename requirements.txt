@@ -1,9 +1,0 @@
-streamlit>=1.30
-pandas>=2.2
-numpy>=1.26
-asyncio
-requests
-beautifulsoup4
-playwright
-yt-dlp
-flask
