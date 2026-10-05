@@ -1,0 +1,407 @@
+import re
+import streamlit as st
+import json
+import pandas as pd
+from pathlib import Path
+import os
+# os.system("playwright install")
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR / "data" / "links.json"
+META_PATH = BASE_DIR / "data" / "metadata.json"
+
+# -----------------------------
+# Loading stream cache function
+# for embedding video
+# -----------------------------
+STREAM_CACHE_PATH = BASE_DIR / "data" / "stream_cache.json"
+
+def load_stream_cache():
+    if STREAM_CACHE_PATH.exists():
+        with open(STREAM_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+stream_cache = load_stream_cache()
+
+# -----------------------------
+# Data Load Functions
+# -----------------------------
+def load_data():
+    if DATA_PATH.exists():
+        with open(DATA_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def load_metadata():
+    if META_PATH.exists():
+        with open(META_PATH,"r") as f:
+            return json.load(f)
+    return {}
+
+def extract_unique_list(data, field):
+    values = set()
+    for item in data:
+        for val in item.get(field, []):
+            if val:
+                values.add(val)
+    return sorted(values)
+
+
+# Load initial data
+data = load_data()
+metadata = load_metadata()
+df = pd.DataFrame(data)
+
+# Normalize list fields
+for movie in data:
+    movie["stars"] = [str(x).strip() for x in movie.get("stars", []) if str(x).strip()]
+    movie["categories"] = [str(x).strip() for x in movie.get("categories", []) if str(x).strip()]
+    movie["positions"] = [str(x).strip() for x in movie.get("positions", []) if str(x).strip()]
+
+# -----------------------------
+# Streamlit Config
+# -----------------------------
+st.set_page_config(page_title="Links Explorer", layout="wide")
+st.markdown("## 🎬 Links Explorer")
+# Remove whitespace from the top of the page and sidebar
+st.markdown("""
+        <style>
+          .block-container {
+                padding-top: 3rem;
+                padding-bottom: 1rem;
+                padding-left: 3rem;
+                padding-right: 3rem;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+# -----------------------------
+# 🔍 FILTERS (Sidebar)
+# -----------------------------
+st.sidebar.markdown("## 🔍 Filters")
+
+cat_fields = ["cat_1", "cat_2", "cat_3", "cat_4", "cat_5", "cat_6"]
+
+duration_range = st.sidebar.slider("Duration (minutes)", 0, 200, (0, 200))
+rating_range = st.sidebar.slider("Rating Range", 1, 10, (5, 10))
+
+core_cats = sorted({item.get("core_cat") for item in data if item.get("core_cat")})
+core_cat_selected = st.sidebar.multiselect("Core Categories", core_cats)
+
+all_cats = extract_unique_list(data, "categories")
+cats_selected = st.sidebar.multiselect("Other Categories", all_cats)
+
+tag_search = st.sidebar.text_input("Tags (comma-separated)")
+
+all_actors = extract_unique_list(data, "stars")
+actors_selected = st.sidebar.multiselect("Actors", all_actors)
+
+all_studios = sorted({item.get("studio") for item in data if item.get("studio")})
+studio_selected = st.sidebar.multiselect("Studios", all_studios)
+
+all_positions = extract_unique_list(data, "positions")
+positions_selected = st.sidebar.multiselect("Positions", all_positions)
+
+# -----------------------------
+# 🎯 Filter Logic
+# -----------------------------
+def matches_filters(movie):
+    try:
+        duration = int(movie.get("duration", 0))
+    except ValueError:
+        duration = 0
+    if not (duration_range[0] <= duration <= duration_range[1]):
+        return False
+
+    try:
+        rate = float(movie.get("rate", 0))
+    except ValueError:
+        rate = 0
+    if not (rating_range[0] <= rate <= rating_range[1]):
+        return False
+
+    if core_cat_selected and movie.get("core_cat", "") not in core_cat_selected:
+        return False
+
+    movie_cats = [c.lower() for c in movie.get("categories", [])]
+    if cats_selected and not any(cat.lower() in movie_cats for cat in cats_selected):
+        return False
+
+    if actors_selected:
+        if not any(actor in movie.get("stars", []) for actor in actors_selected):
+            return False
+
+    movie_positions = movie.get("positions", [])
+    if positions_selected and not any(pos in movie_positions for pos in positions_selected):
+        return False
+
+    if studio_selected and movie.get("studio", "") not in studio_selected:
+        return False
+
+    if tag_search:
+        tags = [t.strip().lower() for t in tag_search.split(",") if t.strip()]
+        movie_tags = str(movie.get("general_tags", "")).lower()
+        if not all(tag in movie_tags for tag in tags):
+            return False
+
+    return True
+
+# Filter the data
+filtered = list(filter(matches_filters, data))
+df_filtered = pd.DataFrame(filtered)
+
+# -----------------------------
+# 🔀 Sorting Controls (strip layout)
+# -----------------------------
+st.markdown(f"#### 🎞️ Filtered Links — {len(df_filtered)} result(s) displayed")
+
+cols = st.columns([3, 3, 3])
+with cols[0]:
+    primary_sort = st.radio("Priority", ["Duration", "Rating", "None"], horizontal=True)
+with cols[1]:
+    dur_order = st.radio("Duration", ["Max", "Min", "None"], horizontal=True)
+with cols[2]:
+    rate_order = st.radio("Rating", ["Max", "Min", "None"], horizontal=True)
+
+# -----------------------------
+# Apply Sorting
+# -----------------------------
+sort_instructions = []
+
+if primary_sort == "Duration":
+    if dur_order != "None":
+        sort_instructions.append(("duration", dur_order == "Min"))
+    if rate_order != "None":
+        sort_instructions.append(("rate", rate_order == "Min"))
+elif primary_sort == "Rating":
+    if rate_order != "None":
+        sort_instructions.append(("rate", rate_order == "Min"))
+    if dur_order != "None":
+        sort_instructions.append(("duration", dur_order == "Min"))
+
+for col_name, ascending in reversed(sort_instructions):
+    df_filtered = df_filtered.sort_values(by=col_name, ascending=ascending)
+
+# -----------------------------
+# Display Cards (Horizontal Layout)
+# -----------------------------
+from utils.stream_resolver import resolve_stream
+import streamlit.components.v1 as components
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"]{
+      min-width: 0px;
+      max-width: 450px;
+    }
+
+    .stApp {
+        background-color: #;
+    }
+
+    hr {
+        margin-top:40px;
+        margin-bottom:40px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+if len(df_filtered) > 0:
+
+    for i in range(len(df_filtered)):
+
+        movie = df_filtered.iloc[i]
+
+        # merge list fields
+        stars = ", ".join(movie.get("stars", []))
+        cats = ", ".join(movie.get("categories", []))
+        positions = ", ".join(movie.get("positions", []))
+
+        url = movie.get("main_link")
+
+        # metadata lookup
+        meta = metadata.get(url, {})
+
+        title = meta.get("title", "No title yet")
+        thumbnail = meta.get("thumbnail", None)
+
+        playback = meta.get("playback", {})
+        playback_kind = playback.get("kind", "none")
+        embed_url = playback.get("embed_url", None)
+
+        left, right = st.columns([1, 2])
+
+        # LEFT SIDE
+        with left:
+
+            if thumbnail:
+                st.image(thumbnail, width="stretch")
+            else:
+                st.markdown(
+                    """
+                    <div style="
+                        height:220px;
+                        display:flex;
+                        align-items:center;
+                        justify-content:center;
+                        border:1px solid #666;
+                        border-radius:8px;
+                        background:#111;
+                        color:#bbb;
+                        text-align:center;
+                    ">
+                        No Thumbnail
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            # playback_mode = meta.get("playback_mode", "none")
+            # playback = meta.get("playback", {})
+
+            # embed_url = playback.get("embed_url")
+            # page_url = playback.get("page_url", url)
+
+            # if playback_mode == "embed" and embed_url:
+            #     components.html(
+            #         f"""
+            #         <iframe
+            #             src="{embed_url}"
+            #             width="100%"
+            #             height="400"
+            #             frameborder="0"
+            #             allowfullscreen>
+            #         </iframe>
+            #         """,
+            #         height=420
+            #     )
+
+            # elif page_url:
+            #     components.html(
+            #         f"""
+            #         <iframe
+            #             src="{page_url}"
+            #             width="100%"
+            #             height="400"
+            #             frameborder="0"
+            #             allowfullscreen>
+            #         </iframe>
+            #         """,
+            #         height=420
+            #     )
+            # elif playback_mode == "direct_proxy":
+            #     stream_url = None
+
+            #     playback = meta.get("playback", {})
+            #     page_url = playback.get("page_url", url)
+
+            #     stream_record = stream_cache.get(url, {})
+            #     if stream_record:
+            #         stream_url = stream_record.get("stream_url")
+
+            #     if stream_url:
+            #         proxied_url = (
+            #             f"http://127.0.0.1:5001/proxy"
+            #             f"?url={stream_url}"
+            #             f"&referer={page_url}"
+            #         )
+            #         st.video(proxied_url)
+            #     else:
+            #         st.markdown("*No stream available yet*")
+
+            # else:
+            #     st.markdown("*No video available*")
+
+
+
+        # with left:
+
+        #     if thumbnail:
+        #         st.image(thumbnail, width="stretch")
+        #     else:
+        #         st.markdown(
+        #             """
+        #             <div style="
+        #                 height:220px;
+        #                 display:flex;
+        #                 align-items:center;
+        #                 justify-content:center;
+        #                 border:1px solid #666;
+        #                 border-radius:8px;
+        #                 background:#111;
+        #                 color:#bbb;
+        #                 text-align:center;
+        #             ">
+        #                 No Thumbnail
+        #             </div>
+        #             """,
+        #             unsafe_allow_html=True
+        #         )
+
+        #     playback_mode = meta.get("playback_mode", "none")
+        #     playback = meta.get("playback", {})
+
+        #     embed_url = playback.get("embed_url")
+        #     page_url = playback.get("page_url", url)
+
+        #     if playback_mode == "embed" and embed_url:
+        #         components.html(
+        #             f"""
+        #             <iframe
+        #                 src="{embed_url}"
+        #                 width="100%"
+        #                 height="400"
+        #                 frameborder="0"
+        #                 allowfullscreen>
+        #             </iframe>
+        #             """,
+        #             height=420
+        #         )
+
+        #     elif page_url:
+        #         components.html(
+        #             f"""
+        #             <iframe
+        #                 src="{page_url}"
+        #                 width="100%"
+        #                 height="400"
+        #                 frameborder="0"
+        #                 allowfullscreen>
+        #             </iframe>
+        #             """,
+        #             height=420
+        #         )
+
+        #     else:
+        #         st.markdown("*No video available*")
+
+
+
+
+        # RIGHT SIDE
+        with right:
+
+            st.markdown(f"## {title}")
+
+            st.write(f"🎥 Duration: {movie.get('duration', '?')} min")
+            st.write(f"⭐ Rating: {movie.get('rate', '?')}")
+
+            st.write(f"Studio: {movie.get('studio', '')}")
+            st.write(f"Core: {movie.get('core_cat', '')}")
+
+            st.write(f"Stars: {stars}")
+            st.write(f"Categories: {cats}")
+            st.write(f"Positions: {positions}")
+
+            st.write(f"Tags: {movie.get('general_tags', '')}")
+
+            st.markdown(f"[Open Source Page]({url})")
+
+        st.markdown("---")
+
+else:
+    st.info("No movies match your filters.")
+
+    

@@ -1,0 +1,7 @@
+streamlit
+pandas
+requests
+beautifulsoup4
+playwright
+yt-dlp
+openpyxl
