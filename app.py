@@ -445,59 +445,61 @@ else:
 
         for col, row in zip(cols, card_row):
             with col:
-                url = str(row.get("_url", "") or "").strip()
-                meta = metadata_for_url(url)
+                with st.expander(label="Link",expanded=True):
+                    with st.container(height=680):
+                        url = str(row.get("_url", "") or "").strip()
+                        meta = metadata_for_url(url)
 
-                # metadata.json is the only source for title and thumbnail.
-                title = str(meta.get("title") or "").strip() or fallback_title(url)
-                thumbnail = str(meta.get("thumbnail") or "").strip()
+                        # metadata.json is the only source for title and thumbnail.
+                        title = str(meta.get("title") or "").strip() or fallback_title(url)
+                        thumbnail = str(meta.get("thumbnail") or "").strip()
 
-                stars = list(row.get("stars", []) or [])
-                cats = list(row.get("categories", []) or [])
-                positions_list = list(row.get("positions", []) or [])
+                        stars = list(row.get("stars", []) or [])
+                        cats = list(row.get("categories", []) or [])
+                        positions_list = list(row.get("positions", []) or [])
 
-                # st.markdown('<div class="card">', unsafe_allow_html=True)
+                        # st.markdown('<div class="card">', unsafe_allow_html=True)
 
-                if thumbnail:
-                    st.image(thumbnail, width='stretch')
-                else:
-                    st.markdown(
-                        '<div class="thumb-placeholder">No thumbnail in metadata.json</div>',
-                        unsafe_allow_html=True,
-                    )
+                        if thumbnail:
+                            st.image(thumbnail, width='stretch')
+                        else:
+                            st.markdown(
+                                '<div class="thumb-placeholder">No thumbnail in metadata.json</div>',
+                                unsafe_allow_html=True,
+                            )
 
-                st.markdown(
-                    f'<div class="card-title">{escape(title)}</div>',
-                    unsafe_allow_html=True,
-                )
+                        st.markdown(
+                            f'<div class="card-title">{escape(title)}</div>',
+                            unsafe_allow_html=True,
+                        )
 
-                duration = row.get("duration", "?")
-                rating = row.get("rate", "?")
-                studio = row.get("studio", "") or "—"
-                core = row.get("core_cat", "") or "—"
+                        duration = row.get("duration", "?")
+                        rating = row.get("rate", "?")
+                        studio = row.get("studio", "") or "—"
+                        core = row.get("core_cat", "") or "—"
 
-                st.markdown(
-                    f'<div class="muted">⏱ {duration} min &nbsp; · &nbsp; ⭐ {rating}'
-                    f' &nbsp; · &nbsp; {studio} &nbsp; · &nbsp; {core} &nbsp; · &nbsp;</div>',
-                    unsafe_allow_html=True,
-                )
-      
-                if stars:
-                    st.write("**Stars:** " + ", ".join(stars))
-                if cats:
-                    st.write("**Categories:** " + ", ".join(cats))
-                if positions_list:
-                    st.write("**Positions:** " + ", ".join(positions_list))
-                tags = row.get("general_tags", "")
-                if tags:
-                    st.write("**Tags:** " + str(tags))
+                        st.markdown(
+                            f'<div class="muted">⏱ {duration} min &nbsp; · &nbsp; ⭐ {rating}'
+                            f' &nbsp; · &nbsp; {studio} &nbsp; · &nbsp; {core} &nbsp; · &nbsp;</div>',
+                            unsafe_allow_html=True,
+                        )
+            
+                        if stars:
+                            st.write("**Stars:** " + ", ".join(stars))
+                        if cats:
+                            st.write("**Categories:** " + ", ".join(cats))
+                        if positions_list:
+                            st.write("**Positions:** " + ", ".join(positions_list))
+                        tags = row.get("general_tags", "")
+                        if tags:
+                            st.write("**Tags:** " + str(tags))
 
-                if url:
-                    st.link_button(
-                        "Open source ↗",
-                        url,
-                        type="secondary",
-                        width='stretch',
-                    )
+                        if url:
+                            st.link_button(
+                                "Open source ↗",
+                                url,
+                                type="secondary",
+                                width='stretch',
+                            )
 
-                st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
